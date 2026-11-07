@@ -1,0 +1,1 @@
+Place royalty-free/licensed instrumental music here (MP3/WAV/M4A). No music is bundled because redistribution rights cannot be assumed. Three optional tracks can be added; choose one in config/settings.yaml.

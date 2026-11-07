@@ -1,0 +1,18 @@
+{
+  "authorization_required": true,
+  "originals_modified": false,
+  "images": [
+    {
+      "source": "/Users/vanithaaruchamy/Documents/GitHub/KAYRA_AI_VIDEO/input/PS-5178-100/product_reference.jpg",
+      "processed": "/Users/vanithaaruchamy/Documents/GitHub/KAYRA_AI_VIDEO/output/PS-5178-100/processed/product_reference.jpg",
+      "watermark_mask": null,
+      "cleaned": false
+    },
+    {
+      "source": "/Users/vanithaaruchamy/Documents/GitHub/KAYRA_AI_VIDEO/input/PS-5178-100/model_reference.jpg",
+      "processed": "/Users/vanithaaruchamy/Documents/GitHub/KAYRA_AI_VIDEO/output/PS-5178-100/processed/model_reference.jpg",
+      "watermark_mask": null,
+      "cleaned": false
+    }
+  ]
+}

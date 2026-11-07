@@ -1,0 +1,7 @@
+{
+  "product_reference": "/Users/vanithaaruchamy/Documents/GitHub/KAYRA_AI_VIDEO/input/PS-5178-100/product_reference.jpg",
+  "model_reference_source": "/Users/vanithaaruchamy/Documents/GitHub/KAYRA_AI_VIDEO/input/PS-5178-100/model_reference.jpg",
+  "master_reference": "/Users/vanithaaruchamy/Documents/GitHub/KAYRA_AI_VIDEO/output/PS-5178-100/assets/master_model_reference.jpg",
+  "strategy": "use_original_model_photo_as_image_to_video_reference",
+  "product_preservation": "Original jewellery pixels are preserved in the master still. Generated video frames are model-generated and must be visually checked; exact pixel-level preservation across motion is not guaranteed."
+}

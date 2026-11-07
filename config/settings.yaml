@@ -1,0 +1,69 @@
+app:
+  name: KAYRA AI VIDEO GENERATOR
+  output_dir: output
+  input_dir: input
+  temp_dir: temp
+  logs_dir: logs
+
+video:
+  width: 1080
+  height: 1920
+  fps: 24
+  target_seconds: 25
+  scene_count: 6
+  scene_seconds: 3.708
+  outro_seconds: 2.5
+  # One-second deliverables are cut from longer model outputs where necessary.
+  clip_segment_seconds: 3.708
+  crf: 19
+  preset: medium
+  music_volume: 0.22
+  audio_fade_seconds: 1.5
+
+storyboard:
+  style: "Premium Brazilian jewellery UGC; photorealistic, emerald green, warm brown and gold; natural movement; cinematic macro detail; refined luxury lifestyle."
+  language: "Portuguese (Brazil)"
+  model_consistency: true
+
+generation:
+  backend: "ltx_mlx_hybrid"
+  ltx_project_dir: "~/Documents/GitHub/ltx-2-mlx"
+  model: "dgrauet/ltx-2.3-mlx-q4"
+  render_width: 256
+  render_height: 448
+  frames: 89
+  distilled: true
+  low_ram: true
+  no_audio: true
+  seed_base: 20261107
+  command_timeout_seconds: 3600
+  batch_size: 1
+  retries: 1
+  require_video_backend: true
+  # Exact source photograph is displayed as a foreground card over the moving LTX scene.
+  product_card_width: 560
+  product_card_height: 700
+  product_card_padding: 22
+  product_card_radius: 28
+  overlay_width: 184
+  overlay_height: 230
+  max_scenes_per_run: 6
+  # Optional manual crop [left, top, right, bottom], normalized 0..1.
+  # Leave null to preserve the full original product photograph.
+  product_crop: null
+  negative_prompt: "jewellery, necklace, pendant, earrings, ring, bracelet, gemstones, text, letters, words, subtitles, captions, watermark, logo, graphic overlay, deformed hands, extra fingers, duplicated objects"
+  command: "python scripts/ltx_mlx_wrapper.py"
+
+analysis:
+  backend: "local"
+  ollama_url: "http://127.0.0.1:11434"
+  ollama_model: "llava:7b"
+  timeout_seconds: 180
+
+assets:
+  logo: "assets/logo/KAYRA_LOGO.jpeg"
+  music_dir: "assets/music"
+  music_file: ""  # blank = first supported local music file
+
+preparation_workers: 2
+ltx_workers: 1
