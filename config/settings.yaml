@@ -20,6 +20,12 @@ video:
   music_volume: 0.22
   audio_fade_seconds: 1.5
 
+audio:
+  background_music: "assets/music/background.mp3"
+
+branding:
+  outro_video: "assets/branding/kayra_logo.mp4"
+  
 storyboard:
   style: "Premium Brazilian jewellery UGC; photorealistic, emerald green, warm brown and gold; natural movement; cinematic macro detail; refined luxury lifestyle."
   language: "Portuguese (Brazil)"

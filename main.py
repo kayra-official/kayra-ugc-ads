@@ -1,4 +1,5 @@
 import argparse
+import yaml
 from pathlib import Path
 from src.common import load_settings
 from src.product_analyzer import analyze_product
@@ -7,10 +8,14 @@ from src.storyboard_renderer import render_contact_sheet
 from src.watermark_preprocessor import preprocess_product_images
 from src.product_compositor import prepare_master_reference
 from src.batch_processor import process_all
-from src.logo_composer import create_logo_outro
 from src.video_assembler import assemble_video
 from src.music_manager import find_music, mix_music
 from src.quality_checker import check_video
+
+CONFIG_PATH = Path("config/settings.yaml")
+
+with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    cfg = yaml.safe_load(f)
 
 def run(image):
     cfg = load_settings()
@@ -33,12 +38,26 @@ def run(image):
     if any(not (Path(clips)/f"scene_{i:02d}.mp4").exists() for i in range(1, len(board["scenes"])+1)):
         print("Some scenes remain. Run again to resume.")
         return None
-    print("[4/7] Creating Kayra outro...")
-    outro = create_logo_outro(cfg["assets"]["logo"], project/"logo_outro.mp4", cfg)
-    print("[5/7] Assembling video...")
-    assembled = assemble_video(clips, outro, project/"picture_only.mp4", cfg)
+    print("[4/7] Loading Kayra logo outro...")
+    outro = Path(cfg["branding"]["outro_video"])
+    if not outro.is_absolute():
+        outro = Path(__file__).resolve().parent / outro
+    if not outro.exists():
+        raise FileNotFoundError(f"Kayra outro not found: {outro}")
+    print("[5/7] Assembling silent video...")
+    assembled = assemble_video(
+        clips,
+        outro,
+        project / "picture_only.mp4",
+        cfg
+    )
     print("[6/7] Adding music and quality checks...")
-    final = mix_music(assembled, find_music(cfg), project/"KAYRA_FINAL.mp4", cfg)
+    final = mix_music(
+        assembled,
+        find_music(cfg),
+        project / "KAYRA_FINAL.mp4",
+        cfg
+    )
     report = check_video(final, cfg["video"]["target_seconds"], cfg["video"]["width"], cfg["video"]["height"])
     print(f"SUCCESS: {final}\\n{report}")
     return final
