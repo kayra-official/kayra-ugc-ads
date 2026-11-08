@@ -11,7 +11,8 @@ def check_video(path, expected_seconds=25, width=1080, height=1920):
     v=next((s for s in streams if s.get("codec_type")=="video"),None)
     if not v: raise ValueError("Export has no video stream.")
     duration=float(data["format"]["duration"])
-    if abs(duration-expected_seconds)>1.0: raise ValueError(f"Unexpected duration: {duration:.2f}s")
+    if expected_seconds is not None and abs(duration-expected_seconds)>1.0:
+        raise ValueError(f"Unexpected duration: {duration:.2f}s")
     if v.get("width")!=width or v.get("height")!=height:
         raise ValueError(f"Unexpected resolution: {v.get('width')}x{v.get('height')}")
     return {"duration":duration,"width":v["width"],"height":v["height"],

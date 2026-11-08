@@ -1,7 +1,8 @@
 from pathlib import Path
 import json
-from PIL import Image, ImageOps
+from shutil import copy2
 from .video_generator import generate_scene, VideoGenerationError
+from .video_assembler import slow_motion_clip
 
 
 def _find_model_reference_set(master_reference, project_dir):
@@ -67,35 +68,87 @@ def process_all(board, image_path, project_dir, cfg, progress=None):
     manifest = Path(project_dir) / "manifest.json"
     pipeline = board.get("pipeline")
 
-    # New pipeline version invalidates old clips and manifest completions.
+    # Pipeline or prompt changes should only invalidate clips whose saved
+    # generation request no longer matches the current scene specification.
     if manifest.exists():
         state = json.loads(manifest.read_text(encoding="utf-8"))
         if state.get("pipeline") != pipeline:
-            state = {"pipeline": pipeline, "completed": [], "failed": {}}
+            state["pipeline"] = pipeline
+            state.setdefault("failed", {})
     else:
         state = {"pipeline": pipeline, "completed": [], "failed": {}}
     state.setdefault("completed", [])
     state.setdefault("failed", {})
 
-    master = Path(image_path).expanduser().resolve()
-    if not master.is_file():
-        raise FileNotFoundError(f"Master model reference image not found: {master}")
+    references = board.get("references", {})
+    missing_refs = [key for key in ("product_hero", "model_ugc")
+                    if not Path(references.get(key, "")).is_file()]
+    if missing_refs:
+        raise FileNotFoundError("Source references missing: " + ", ".join(missing_refs))
+    product = Path(references["product_hero"]).resolve()
 
-    product = Path(board.get("product_reference", "")).expanduser()
-    if not product.is_file():
-        raise FileNotFoundError(f"Product-only reference image not found: {product}")
+    for n in (5, 6):
+        existing = clips / f"scene_{n:02d}.mp4"
+        if existing.is_file() and existing.stat().st_size > 1024:
+            scene = next((s for s in board["scenes"] if int(s["scene_number"]) == n), None)
+            expected_ref = Path(
+                (scene or {}).get("reference_image") or references.get("model_ugc", "")
+            ).resolve()
+            request_path = clips / f"scene_{n:02d}_ltx_source.request.json"
+            if not request_path.exists():
+                request_path = clips / f"scene_{n:02d}.request.json"
+            try:
+                previous_request = json.loads(request_path.read_text())
+                previous_ref_value = previous_request.get("reference_image")
+                previous_ref = Path(previous_ref_value).resolve() if previous_ref_value else None
+            except (OSError, ValueError, TypeError):
+                previous_request = {}
+                previous_ref = None
 
-    model_count = int(board.get("model_scene_count", 6))
-    model_sources = _find_model_reference_set(master, project_dir)
-    fallback_crops = _make_framing_variants(master, project_dir, model_count)
+            expected_prompt = (scene or {}).get("video_prompt")
+            prompt_changed = bool(expected_prompt and previous_request.get("prompt")
+                                  and previous_request["prompt"] != expected_prompt)
+            if previous_ref is not None and (previous_ref != expected_ref or prompt_changed):
+                # Preserve old renders, but regenerate when the source or scene
+                # direction changed so the new timeline uses the right footage.
+                archive = clips / "stale_model_scene"
+                archive.mkdir(exist_ok=True)
+                for stale in (existing, clips / f"scene_{n:02d}_ltx_source.mp4",
+                              request_path, clips / f"scene_{n:02d}.request.json"):
+                    if stale.is_file():
+                        destination = archive / stale.name
+                        if destination.exists():
+                            destination = archive / f"{stale.stem}_{len(list(archive.iterdir()))}{stale.suffix}"
+                        stale.replace(destination)
+                state["completed"] = [done for done in state["completed"] if int(done) != n]
+                applied = state.get("slow_motion_applied", {})
+                if isinstance(applied, dict):
+                    applied.pop(str(n), None)
+            else:
+                state["completed"] = sorted(set(state["completed"] + [n]))
 
-    # Prioritize actual supplied pose photos. Crops are only fallback framing.
-    scene_model_refs = []
-    for idx in range(model_count):
-        if idx < len(model_sources):
-            scene_model_refs.append(model_sources[idx])
-        else:
-            scene_model_refs.append(fallback_crops[idx])
+    applied = state.setdefault("slow_motion_applied", {})
+    if isinstance(applied, list):
+        applied = {str(n): 0.60 for n in applied}
+        state["slow_motion_applied"] = applied
+    model_speed = float(cfg["generation"].get("model_scene_speed", 0.5))
+
+    # Retiming only the two retained model scenes avoids touching discarded clips.
+    for n in (5, 6):
+        dest = clips / f"scene_{n:02d}.mp4"
+        if n in state["completed"] and dest.is_file() and applied.get(str(n)) != model_speed:
+            source_clip = clips / f"scene_{n:02d}_ltx_source.mp4"
+            source_speed = float(applied.get(str(n), 1.0))
+            retime_speed = model_speed
+            if not source_clip.is_file():
+                copy2(dest, source_clip)
+                retime_speed = model_speed / source_speed
+            temp_slow = clips / f".scene_{n:02d}.slow.mp4"
+            slow_motion_clip(source_clip, temp_slow, cfg, speed=retime_speed,
+                             target_duration=cfg["video"].get("scene_seconds", 7.0))
+            temp_slow.replace(dest)
+            applied[str(n)] = model_speed
+            manifest.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
     retries = int(cfg["generation"].get("retries", 1))
     max_scenes = int(cfg["generation"].get("max_scenes_per_run", len(board["scenes"])))
@@ -108,16 +161,17 @@ def process_all(board, image_path, project_dir, cfg, progress=None):
         if n in state["completed"] and dest.exists() and dest.stat().st_size > 1024:
             continue
 
-        if scene.get("reference_role") == "product":
-            ref = product.resolve()
-        else:
-            ref_index = int(scene.get("preferred_reference_index", n)) - 1
-            ref = scene_model_refs[max(0, min(ref_index, len(scene_model_refs)-1))]
+        ref = Path(scene.get("reference_image") or references[scene["reference_role"]]).resolve()
 
         last_error = None
         for _ in range(retries + 1):
             try:
-                generate_scene(scene, ref, dest, cfg, product_reference=product)
+                raw = clips / f"scene_{n:02d}_ltx_source.mp4" if n in (5, 6) else dest
+                generate_scene(scene, ref, raw, cfg, product_reference=product)
+                if n in (5, 6):
+                    slow_motion_clip(raw, dest, cfg, speed=model_speed,
+                                     target_duration=float(scene.get("duration_seconds", 7.0)))
+                    applied[str(n)] = model_speed
                 state["completed"] = sorted(set(state["completed"] + [n]))
                 state["failed"].pop(str(n), None)
                 last_error = None

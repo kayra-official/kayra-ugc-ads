@@ -17,14 +17,15 @@ def generate_scene(scene, reference_image, output_path, cfg, product_reference=N
             "to the local JSON-request wrapper before generating video."
         )
 
-    role = scene.get("reference_role", "model")
+    role = scene.get("reference_role", "model_ugc")
+    is_product = role == "product" or role == "product_hero"
+    is_snapshot_pass = scene.get("conditioning_stage") == "snapshot"
     selected_reference = product_reference if role == "product" else reference_image
     if not selected_reference:
         raise VideoGenerationError(f"Scene {scene['scene_number']:02d} requires a {role} reference image.")
     reference = Path(selected_reference).expanduser().resolve()
     if not reference.is_file():
         raise VideoGenerationError(f"Scene {scene['scene_number']:02d} {role} reference not found: {reference}")
-
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     contract = {
@@ -41,9 +42,25 @@ def generate_scene(scene, reference_image, output_path, cfg, product_reference=N
         "seed": 20261107 + int(scene["scene_number"]),
         "model": "LTX-2.3 MLX",
         "mode": "image-to-video",
-        "preserve_model_identity": role == "model",
+        "preserve_model_identity": not is_product,
         "preserve_product_design": True,
         "reference_is_authoritative": True,
+        "conditioning_stage": (
+            "ugc_snapshot" if is_snapshot_pass else
+            "scene_from_original_model_image" if role == "model_ugc" else
+            "scene_from_ugc_snapshot"
+        ),
+        # Explicit guide conditioning anchors model scenes to the same cached
+        # model-with-jewellery image instead of letting LTX freely reinterpret it.
+        "image_binding": "guide",
+        "image_strength": float(
+            cfg["generation"].get("snapshot_product_image_strength", 0.95)
+            if role == "product_hero"
+            else cfg["generation"].get(
+                "snapshot_image_strength" if is_snapshot_pass else "model_scene_image_strength",
+                0.65 if is_snapshot_pass else 1.0,
+            )
+        ),
     }
     request = out.with_suffix(".request.json")
     request.write_text(json.dumps(contract, indent=2, ensure_ascii=False), encoding="utf-8")

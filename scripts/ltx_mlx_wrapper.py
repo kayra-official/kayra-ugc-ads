@@ -16,8 +16,6 @@ def main():
     request_path = Path(sys.argv[1]).expanduser().resolve()
     request = json.loads(request_path.read_text(encoding="utf-8"))
 
-    ltx_dir = Path.home() / "Documents/GitHub/ltx-2-mlx"
-
     reference = Path(request["reference_image"]).expanduser().resolve()
     output = Path(request["output_video"]).expanduser().resolve()
 
@@ -33,19 +31,23 @@ def main():
     )
     generation = settings["generation"]
 
+    ltx_dir = Path(generation.get("ltx_project_dir", "~/Documents/GitHub/ltx-2-mlx")).expanduser().resolve()
     model = generation["model"]
     width = int(generation["render_width"])
     height = int(generation["render_height"])
     frames = int(generation.get("frames", 25))
 
+    ltx_executable = ltx_dir / ".venv" / "bin" / "ltx-2-mlx"
     command = [
-        "uv", "run",
-        "--package", "ltx-pipelines-mlx",
-        "ltx-2-mlx", "generate",
+        str(ltx_executable) if ltx_executable.is_file() else "uv",
+    ]
+    if not ltx_executable.is_file():
+        command.extend(["run", "--package", "ltx-pipelines-mlx", "ltx-2-mlx"])
+    command.extend([
+        "generate",
         "--prompt", prompt,
         "--output", str(output),
         "--model", model,
-        "--image", str(reference),
         "--width", str(width),
         "--height", str(height),
         "--frames", str(frames),
@@ -54,7 +56,15 @@ def main():
         "--distilled",
         "--low-ram",
         "--no-audio",
-    ]
+    ])
+    # Use guided frame conditioning for both snapshot and video passes. The
+    # scene pass previously relied on LTX's automatic image binding, which
+    # gave it more freedom to reinterpret the pendant and earrings.
+    command.extend([
+        "--image", str(reference), "0",
+        str(request.get("image_strength", 0.65)),
+        request.get("image_binding", "guide"),
+    ])
 
     print("Starting LTX-2.3 MLX...")
     print("Reference:", reference)

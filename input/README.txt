@@ -1,1 +1,1 @@
-Optional CLI input staging folder.
+Each product folder needs a product_reference image, a model_reference image, and a supplied product video (.mp4, .mov, .m4v, or .webm). Scenes 1–4 are cut from the video; scenes 5–8 use the existing model-video workflow.

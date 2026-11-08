@@ -1,21 +1,20 @@
-import hashlib
-import json
 from pathlib import Path
+
 import gradio as gr
 
 from src.common import load_settings
-from src.product_analyzer import analyze_product
+from src.video_assembler import assemble_video, prepare_product_clip, fit_model_scene_durations
+from src.music_manager import find_music, mix_music
+from src.quality_checker import check_video
+from src.snapshot_manager import discover_product_video, discover_snapshots
+from src.snapshot_generator import ensure_ugc_snapshots
 from src.storyboard_generator import create_storyboard, save_storyboard
 from src.storyboard_renderer import render_contact_sheet
 from src.batch_processor import process_all
-from src.video_assembler import assemble_video
-from src.music_manager import find_music, mix_music
-from src.quality_checker import check_video
-from src.product_compositor import prepare_master_reference
-from src.watermark_preprocessor import preprocess_product_images
 
 cfg = load_settings()
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+ALL_PRODUCTS = "__all_products__"
 
 
 def input_root():
@@ -29,19 +28,20 @@ def output_root():
 
 
 def discover_products():
-    """Discover input/<product-folder>/ and choose its product reference image."""
+    """Return one named product entry for every usable product input folder."""
     root = input_root()
     root.mkdir(parents=True, exist_ok=True)
     preferred = (
-        "product_reference.jpg", "product_reference.jpeg",
-        "product_reference.png", "product_reference.webp",
-        "product.jpg", "product.jpeg", "product.png", "product.webp",
-        "reference.jpg", "reference.png", "main.jpg", "main.png",
+        "product_reference.jpg", "product_reference.jpeg", "product_reference.png",
+        "product_reference.webp", "product.jpg", "product.jpeg", "product.png",
+        "product.webp", "reference.jpg", "reference.png", "main.jpg", "main.png",
     )
     products = []
     for folder in sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.name.lower()):
+        scan_dir = folder / "product_images"
+        scan_dir = scan_dir if scan_dir.is_dir() else folder
         images = [
-            p for p in folder.iterdir()
+            p for p in scan_dir.iterdir()
             if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
             and not p.stem.lower().startswith(("model_reference", "model_", "model-"))
         ]
@@ -51,7 +51,7 @@ def discover_products():
         chosen = next((by_name[name] for name in preferred if name in by_name), None)
         if chosen is None:
             chosen = sorted(images, key=lambda p: p.name.lower())[0]
-        products.append((f"{folder.name} · {chosen.name}", str(chosen.resolve())))
+        products.append((folder.name, str(chosen.resolve())))
     return products
 
 
@@ -65,198 +65,150 @@ def product_project(image_path):
     return output_root() / name
 
 
-def load_selected_product(image_path):
-    if image_path and Path(image_path).is_file():
-        return str(Path(image_path).resolve())
-    return None
+def product_folder(image_path):
+    image = Path(image_path).expanduser().resolve()
+    try:
+        return input_root() / image.relative_to(input_root()).parts[0]
+    except (ValueError, IndexError):
+        return image.parent
+
+
+def dropdown_choices(products=None):
+    products = discover_products() if products is None else products
+    return [("All products", ALL_PRODUCTS), *products]
 
 
 def refresh_products(current_value=None):
-    products = discover_products()
-    values = [value for _, value in products]
-    selected = current_value if current_value in values else (values[0] if values else None)
-    return gr.update(choices=products, value=selected), selected
+    choices = dropdown_choices()
+    values = [value for _, value in choices]
+    selected = current_value if current_value in values else (values[1] if len(values) > 1 else ALL_PRODUCTS)
+    return gr.update(choices=choices, value=selected)
 
-def resolve_original_product_image(gradio_image):
-    """Map Gradio's temporary image copy to its original input file."""
-    if not gradio_image:
-        raise FileNotFoundError("No product image selected.")
 
-    selected = Path(gradio_image).resolve()
-
-    def file_hash(path):
-        h = hashlib.sha256()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                h.update(chunk)
-        return h.hexdigest()
-
-    if not selected.is_file():
-        raise FileNotFoundError(f"Selected image not found: {selected}")
-
-    selected_hash = file_hash(selected)
-    input_root = Path("input").resolve()
-
-    for candidate in input_root.rglob("*"):
-        if (candidate.is_file()
-                and candidate.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
-                and candidate.name.lower() == selected.name.lower()
-                and file_hash(candidate) == selected_hash):
-            return candidate.resolve()
-
-    raise FileNotFoundError(
-        f"Could not locate the original product image in {input_root}: "
-        f"{selected.name}"
-    )
-
-def storyboard(image):
-    if not image:
-        raise gr.Error("No product found. Add a product folder under input/ and click REFRESH PRODUCTS.")
-    p = resolve_original_product_image(image)
-    project = product_project(p)
+def generate_one(image_path, progress, start, span):
+    product_name = Path(image_path).resolve().relative_to(input_root()).parts[0]
+    project = product_project(image_path)
     project.mkdir(parents=True, exist_ok=True)
-    processed = preprocess_product_images(p, project)
-    analysis = analyze_product(processed["product_reference"], cfg)
-    master = prepare_master_reference(p, project, required=True)
-    master["master_reference"] = processed["model_reference"]
-    master["product_reference"] = processed["product_reference"]
-    board = create_storyboard(analysis, cfg)
-    board["master_reference"] = master["master_reference"]
-    board["product_reference"] = master["product_reference"]
+
+    def stage(fraction, message):
+        progress(start + span * fraction, desc=f"{product_name} · {message}")
+
+    product_clip = discover_product_video(product_folder(image_path))
+    source_refs = discover_snapshots(product_folder(image_path))
+    if "model_ugc" not in source_refs:
+        raise FileNotFoundError(f"Model-with-jewellery image not found under {product_folder(image_path)}.")
+    model_refs = ensure_ugc_snapshots(
+        product_folder(image_path), project, cfg,
+        lambda n, total, message: stage(0.08 + 0.10 * n / max(total, 1), message),
+        roles=("model_ugc",),
+    )
+    refs = {"product_hero": str(Path(image_path).resolve()), "model_ugc": model_refs["model_ugc"]}
+    clips = project / "clips"
+    stage(0.04, "Slowing the supplied product video and removing its audio")
+    prepare_product_clip(product_clip, clips / "scene_01.mp4", cfg)
+    stage(0.20, "Preparing model-with-jewelry scenes 5–6")
+    board = create_storyboard({"source": str(Path(image_path).resolve())}, cfg, refs)
+    board["scenes"] = [scene for scene in board["scenes"] if scene["scene_number"] in (5, 6)]
+    board["scene_count"] = 6
+    board["pipeline"] = "product_clip_scenes_1_4_model_ugc_scenes_5_8_v2"
+    board["duration_seconds"] = cfg["video"]["target_seconds"]
     save_storyboard(board, project)
-    sheet = render_contact_sheet(board, master["product_reference"], project / "storyboard_contact_sheet.jpg", model_image_path=master["master_reference"])
-    return str(project / "storyboard.json"), str(sheet), str(project)
+    render_contact_sheet(board, refs["product_hero"], project / "storyboard_contact_sheet.jpg")
+    process_all(
+        board, refs["product_hero"], project, cfg,
+        lambda n, total, message: stage(0.20 + 0.55 * n / max(total, 1), message),
+    )
+    missing = [i for i in (1, 5, 6) if not (clips / f"scene_{i:02d}.mp4").is_file()]
+    if missing:
+        raise RuntimeError(f"{product_name}: scenes still missing: {', '.join(map(str, missing))}.")
+
+    outro = Path(cfg["branding"]["outro_video"])
+    if not outro.is_absolute():
+        outro = Path(__file__).resolve().parent / outro
+    if not outro.is_file():
+        raise FileNotFoundError(f"Kayra outro not found: {outro}")
+    stage(0.84, "Appending the Kayra logo video")
+    clip_durations = fit_model_scene_durations(
+        clips / "scene_01.mp4", outro, cfg["video"]["target_seconds"], cfg["video"]["fps"],
+        scene_numbers=(5, 6), outro_seconds=cfg["video"]["outro_seconds"],
+    )
+    assembled = assemble_video(clips, outro, project / "picture_only.mp4", cfg,
+        scene_count=6, scene_numbers=(1, 5, 6),
+                               clip_durations=clip_durations)
+    stage(0.90, "Adding background music")
+    final_video = mix_music(assembled, find_music(cfg), project / "KAYRA_FINAL.mp4", cfg)
+    check_video(final_video, None, cfg["video"]["width"], cfg["video"]["height"])
+    return str(final_video), product_name
 
 
-def generate(image, progress=gr.Progress()):
-    if not image:
-        raise gr.Error("No product selected. Add a product folder under input/ and click REFRESH PRODUCTS.")
-    p = resolve_original_product_image(image)
-    project = product_project(p)
-    project.mkdir(parents=True, exist_ok=True)
-    try:
-        progress(0.03, desc="Image preprocessing")
-        processed = preprocess_product_images(p, project)
-        progress(0.08, desc="Product analysis")
-        analysis = analyze_product(processed["product_reference"], cfg)
-        master = prepare_master_reference(p, project, required=True)
-        master["master_reference"] = processed["model_reference"]
-        master["product_reference"] = processed["product_reference"]
-        board = create_storyboard(analysis, cfg)
-        board["master_reference"] = master["master_reference"]
-        board["product_reference"] = master["product_reference"]
-        save_storyboard(board, project)
-        render_contact_sheet(board, master["product_reference"], project / "storyboard_contact_sheet.jpg", model_image_path=master["master_reference"])
-        progress(0.12, desc="Storyboard generated; master model reference prepared")
-        # The scene references/order changed. Never reuse old all-model clips for product scenes.
-        manifest_path = project / "manifest.json"
-        old_state = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
-        if old_state.get("pipeline") != board["pipeline"]:
-            old_state = {"pipeline": board["pipeline"], "completed": [], "failed": {}}
-            manifest_path.write_text(json.dumps(old_state, indent=2), encoding="utf-8")
-        clips = process_all(
-            board, master["master_reference"], project, cfg,
-            lambda n, t, m: progress(0.12 + 0.65 * n / max(t, 1), desc=m)
-        )
-        if len(list(clips.glob("scene_*.mp4"))) < len(board["scenes"]):
-            return (
-                str(project / "storyboard.json"),
-                str(project / "storyboard_contact_sheet.jpg"),
-                None,
-                "First batch completed. Generate the remaining scenes before final assembly."
+def generate(selection, progress=gr.Progress()):
+    products = discover_products()
+    if not products:
+        raise gr.Error("No products found. Add a product reference image and product video to a folder under input/.")
+
+    selected = products if selection == ALL_PRODUCTS else [item for item in products if item[1] == selection]
+    if not selected:
+        raise gr.Error("That product is no longer in the input folder. Refresh the page and choose again.")
+
+    results = []
+    total = len(selected)
+    for index, (product_name, image_path) in enumerate(selected):
+        start, span = index / total, 1 / total
+        try:
+            results.append(generate_one(image_path, progress, start, span))
+        except Exception as exc:
+            raise gr.Error(f"{product_name}: {exc}")
+    progress(1, desc="All selected videos are ready")
+    return results
+
+
+CSS = """
+:root { --kayra-ink: #1b2823; --kayra-muted: #6d7771; --kayra-accent: #168b68; }
+body { background: #f6f7f5; }
+.gradio-container { max-width: 1050px !important; margin: 0 auto !important; }
+#kayra-shell { padding: 34px 28px 26px; }
+#kayra-title { color: var(--kayra-ink); font-size: 34px; font-weight: 650; letter-spacing: -.04em; }
+#kayra-subtitle { color: var(--kayra-muted); font-size: 15px; margin-top: 7px; }
+#kayra-controls { margin-top: 30px; padding: 22px; border: 1px solid #e7ebe7; border-radius: 18px; background: white; }
+#kayra-generate { min-height: 52px; border-radius: 12px; font-weight: 650; }
+#kayra-results { margin-top: 26px; }
+@media (max-width: 640px) { #kayra-shell { padding: 24px 14px; } #kayra-title { font-size: 28px; } }
+"""
+
+
+initial_choices = dropdown_choices()
+initial_value = initial_choices[1][1] if len(initial_choices) > 1 else ALL_PRODUCTS
+
+with gr.Blocks(title="KAYRA · UGC Studio") as demo:
+    with gr.Column(elem_id="kayra-shell"):
+        gr.Markdown("# KAYRA UGC Studio", elem_id="kayra-title")
+        gr.Markdown("Choose one product or create videos for every product in your library.", elem_id="kayra-subtitle")
+        with gr.Column(elem_id="kayra-controls"):
+            product_choice = gr.Dropdown(
+                choices=initial_choices,
+                value=initial_value,
+                label="Product",
+                interactive=True,
+                filterable=True,
             )
-        progress(0.80, desc="Logo integration")
-        outro = Path(cfg["branding"]["outro_video"])
-        if not outro.is_absolute():
-            outro = Path(__file__).resolve().parent / outro
-
-        if not outro.exists():
-            raise FileNotFoundError(f"Kayra outro not found: {outro}")
-        progress(0.87, desc="Video assembly")
-        assembled = assemble_video(clips, outro, project / "picture_only.mp4", cfg)
-        progress(0.94, desc="Music integration")
-        final_video = mix_music(assembled, find_music(cfg), project / "KAYRA_FINAL.mp4", cfg)
-        report = check_video(final_video, 25, 1080, 1920)
-        progress(1, desc="Complete")
-        return str(project / "storyboard.json"), str(project / "storyboard_contact_sheet.jpg"), str(final_video), report
-    except Exception as exc:
-        raise gr.Error(str(exc))
-
-
-def regen(image, scene_no):
-    if not image:
-        raise gr.Error("Select a product folder first.")
-    p = resolve_original_product_image(image)
-    project = product_project(p)
-    board_file = project / "storyboard.json"
-    if not board_file.exists():
-        raise gr.Error("Generate the storyboard first.")
-    board = json.loads(board_file.read_text(encoding="utf-8"))
-    number = int(scene_no)
-    if number < 1 or number > len(board["scenes"]):
-        raise gr.Error(f"Scene number must be between 1 and {len(board['scenes'])}.")
-    from src.video_generator import generate_scene
-    master = board.get("master_reference")
-    if not master or not Path(master).is_file():
-        raise gr.Error("Master model reference is missing. Generate the storyboard again.")
-    out = project / "clips" / f"scene_{number:02d}.mp4"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    generate_scene(
-        board["scenes"][number - 1], master, out, cfg,
-        product_reference=board.get("product_reference", str(p))
-    )
-    return str(out)
-
-
-initial_products = discover_products()
-initial_value = initial_products[0][1] if initial_products else None
-
-with gr.Blocks(title="KAYRA AI VIDEO GENERATOR", theme=gr.themes.Soft(primary_hue="emerald")) as demo:
-    gr.Markdown(
-        "# KAYRA AI VIDEO GENERATOR\n"
-        "Automatically discovers product folders in `input/`. Select a product, "
-        "generate six human-led Brazilian creator scenes with LTX-2.3 MLX.\\n\\n"
-        "Authorized watermark cleanup: add same-size `product_reference_watermark_mask.png` "
-        "and/or `model_reference_watermark_mask.png` beside the source image. White marks "
-        "the watermark area; black protects the rest. Originals are never overwritten."
-    )
-    with gr.Row():
-        product_choice = gr.Dropdown(
-            choices=initial_products, value=initial_value,
-            label="Discovered products", interactive=True, scale=5
+            generate_btn = gr.Button("Generate UGC video", variant="primary", elem_id="kayra-generate")
+        results = gr.Gallery(
+            label="Your videos",
+            columns=2,
+            rows=1,
+            height=520,
+            object_fit="contain",
+            allow_preview=True,
+            buttons=["download", "fullscreen"],
+            elem_id="kayra-results",
         )
-        refresh_btn = gr.Button("REFRESH PRODUCTS", variant="secondary", scale=1)
 
-    image = gr.Image(
-        value=initial_value, type="filepath",
-        label="Selected product reference", sources=[], interactive=False
-    )
-    with gr.Row():
-        sb = gr.Button("GENERATE STORYBOARD", variant="secondary")
-        go = gr.Button("GENERATE UGC VIDEO", variant="primary")
+    demo.load(refresh_products, inputs=product_choice, outputs=product_choice)
+    generate_btn.click(generate, inputs=product_choice, outputs=results)
 
-    project = gr.Textbox(label="Project folder", interactive=False)
-    storyboard_file = gr.File(label="Storyboard JSON")
-    sheet = gr.Image(label="5 × 5 storyboard contact sheet")
-    final = gr.Video(label="Final KAYRA advertisement")
-    report = gr.JSON(label="Quality report")
-
-    product_choice.change(load_selected_product, product_choice, image)
-    refresh_btn.click(refresh_products, product_choice, [product_choice, image])
-    sb.click(storyboard, image, [storyboard_file, sheet, project])
-    go.click(generate, image, [storyboard_file, sheet, final, report])
-
-    gr.Markdown("### Regenerate one scene")
-    scene = gr.Number(value=1, minimum=1, maximum=6, precision=0, label="Scene number")
-    clip = gr.Video(label="Regenerated clip")
-    regen_btn = gr.Button("REGENERATE SCENE")
-    regen_btn.click(regen, [image, scene], clip)
-
-    if not initial_products:
-        gr.Markdown(
-            "**No products discovered yet.** Create folders such as "
-            "`input/product_001/product_reference.jpg`, then click **REFRESH PRODUCTS**."
-        )
 
 if __name__ == "__main__":
-    demo.launch(server_name="127.0.0.1", server_port=7860)
+    demo.launch(
+        server_name="127.0.0.1", server_port=7860,
+        theme=gr.themes.Soft(primary_hue="emerald"), css=CSS,
+    )
