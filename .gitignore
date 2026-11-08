@@ -1,8 +1,8 @@
-/.venv/**
+.venv/
 /output/**
 /temp/**
 /src/__pycache__/**
 /.venv
 *.dylib
 .DS_Store
-.venv/lib/python3.10/site-packages/cv2/__init__.pyi
+__pycache__/**
