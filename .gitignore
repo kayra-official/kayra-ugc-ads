@@ -1,2 +1,4 @@
 /.venv/*.*
 /output/**
+/temp/**
+/src/__pycache__/**

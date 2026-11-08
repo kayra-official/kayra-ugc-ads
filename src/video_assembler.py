@@ -1,14 +1,10 @@
 from pathlib import Path
 import subprocess
 
-outro = Path("assets/branding/kayra_logo.mp4")
-
-
 def _run(cmd):
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
-
-def assemble_video(clips_dir, outro, output, cfg, music=cfg["audio"]["background_music"]):
+def assemble_video(clips_dir, outro, output, cfg):
     clips = Path(clips_dir)
     outro = Path(outro)
     output = Path(output)

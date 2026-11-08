@@ -8,7 +8,6 @@ from src.product_analyzer import analyze_product
 from src.storyboard_generator import create_storyboard, save_storyboard
 from src.storyboard_renderer import render_contact_sheet
 from src.batch_processor import process_all
-from src.logo_composer import create_logo_outro
 from src.video_assembler import assemble_video
 from src.music_manager import find_music, mix_music
 from src.quality_checker import check_video
@@ -167,7 +166,12 @@ def generate(image, progress=gr.Progress()):
                 "First batch completed. Generate the remaining scenes before final assembly."
             )
         progress(0.80, desc="Logo integration")
-        outro = create_logo_outro(cfg["assets"]["logo"], project / "logo_outro.mp4", cfg)
+        outro = Path(cfg["branding"]["outro_video"])
+        if not outro.is_absolute():
+            outro = Path(__file__).resolve().parent / outro
+
+        if not outro.exists():
+            raise FileNotFoundError(f"Kayra outro not found: {outro}")
         progress(0.87, desc="Video assembly")
         assembled = assemble_video(clips, outro, project / "picture_only.mp4", cfg)
         progress(0.94, desc="Music integration")
