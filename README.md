@@ -18,7 +18,7 @@ Each product folder contains the product clip and two original images:
 
 The app scans each product folder automatically. It dynamically trims each supplied product video to preserve six seconds of source footage, removes its original audio, and slows that footage to half speed for a 12-second opening. Shorter source clips are slowed further rather than trimmed below 12 seconds. The model scenes use the original model-with-jewellery input. Scene 5 moves from the pendant to a close-up of the earrings; Scene 6 keeps the previous necklace-close-up prompt. Each is slowed to and trimmed at seven seconds. The 28-second final video uses 12 seconds for the product clip, 14 seconds for Scenes 5–6, and the final 2 seconds for the Kayra logo.
 
-The product clip's original soundtrack is removed before assembly. The Kayra logo video is appended after scene 8, then the local music track is laid over the full export.
+The product clip's original soundtrack is removed before assembly. The Kayra logo video is appended after Scene 6, then the local music track is laid over the full export.
 
 The Gradio screen has one product dropdown, including an **All products** option, and one **Generate UGC video** button. Storyboard creation runs automatically as part of video generation. The results area displays only the finished video or videos. The CLI does the same:
 
@@ -26,7 +26,7 @@ The Gradio screen has one product dropdown, including an **All products** option
 python main.py /absolute/path/to/input/PRODUCT_NAME/product_reference.jpg
 ```
 
-Outputs are written to `output/PRODUCT_NAME/`, including the model UGC snapshot, storyboard, scene clips, and final video.
+Outputs are written to `output/PRODUCT_NAME/`, including the storyboard, scene clips, and final video.
 
 ## Local model and hardware
 

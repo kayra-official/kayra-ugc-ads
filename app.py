@@ -110,7 +110,7 @@ def generate_one(image_path, progress, start, span):
     board = create_storyboard({"source": str(Path(image_path).resolve())}, cfg, refs)
     board["scenes"] = [scene for scene in board["scenes"] if scene["scene_number"] in (5, 6)]
     board["scene_count"] = 6
-    board["pipeline"] = "product_clip_scenes_1_4_model_ugc_scenes_5_8_v2"
+    board["pipeline"] = "product_clip_scene_1_model_ugc_scenes_5_6_v3"
     board["duration_seconds"] = cfg["video"]["target_seconds"]
     save_storyboard(board, project)
     render_contact_sheet(board, refs["product_hero"], project / "storyboard_contact_sheet.jpg")
