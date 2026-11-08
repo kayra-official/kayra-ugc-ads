@@ -10,7 +10,7 @@ video:
   height: 1920
   fps: 24
   target_seconds: 25
-  scene_count: 6
+  scene_count: 9
   scene_seconds: 3.708
   outro_seconds: 2.5
   # One-second deliverables are cut from longer model outputs where necessary.
@@ -53,7 +53,7 @@ generation:
   product_card_radius: 28
   overlay_width: 184
   overlay_height: 230
-  max_scenes_per_run: 6
+  max_scenes_per_run: 9
   # Optional manual crop [left, top, right, bottom], normalized 0..1.
   # Leave null to preserve the full original product photograph.
   product_crop: null
