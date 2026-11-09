@@ -35,7 +35,7 @@ def main():
     model = generation["model"]
     width = int(generation["render_width"])
     height = int(generation["render_height"])
-    frames = int(generation.get("frames", 25))
+    frames = int(request.get("frames", generation.get("frames", 25)))
 
     ltx_executable = ltx_dir / ".venv" / "bin" / "ltx-2-mlx"
     command = [

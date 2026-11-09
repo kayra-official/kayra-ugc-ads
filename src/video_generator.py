@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import hashlib
 import shlex
 import subprocess
 
@@ -26,16 +27,19 @@ def generate_scene(scene, reference_image, output_path, cfg, product_reference=N
     reference = Path(selected_reference).expanduser().resolve()
     if not reference.is_file():
         raise VideoGenerationError(f"Scene {scene['scene_number']:02d} {role} reference not found: {reference}")
+    digest = hashlib.sha256(reference.read_bytes()).hexdigest()
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     contract = {
         "scene_number": scene["scene_number"],
         "prompt": scene["video_prompt"],
         "reference_image": str(reference),
+        "reference_sha256": digest,
         "reference_role": role,
         "product_reference": str(Path(product_reference).resolve()) if product_reference else None,
         "output_video": str(out.resolve()),
         "duration_seconds": scene.get("duration_seconds", 1),
+        "frames": round(float(scene.get("duration_seconds", 1)) * int(cfg["video"]["fps"])),
         "width": cfg["video"]["width"],
         "height": cfg["video"]["height"],
         "fps": cfg["video"]["fps"],

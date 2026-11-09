@@ -63,7 +63,7 @@ def prepare_product_clip(product_clip, output_path, cfg):
         f"fps={fps},scale={width}:{height}:force_original_aspect_ratio=increase,"
         f"crop={width}:{height},setsar=1,"
         # Retiming can lose a frame or two at the endpoint; clone the last
-        # frame so the fixed-duration export always reaches its 12-second mark.
+        # frame so the fixed-duration export reaches its configured mark.
         f"tpad=stop_mode=clone:stop_duration=1"
     )
     _run(["ffmpeg", "-y", "-ss", f"{start:.6f}", "-i", str(source), "-t", str(target_duration),
@@ -92,7 +92,8 @@ def assemble_video(clips_dir, outro, output, cfg, scene_count=None, scene_number
             raise FileNotFoundError(f"Missing scene clip: {src}")
         dst = temp / f"norm_{i:02d}.mp4"
         duration = clip_durations.get(i)
-        start = max(0.0, (media_duration(src) - float(duration)) / 2) if duration else 0.0
+        source_duration = media_duration(src)
+        start = max(0.0, (source_duration - float(duration)) / 2) if duration else 0.0
         cmd = ["ffmpeg", "-y"]
         if start:
             cmd.extend(["-ss", f"{start:.6f}"])
@@ -101,6 +102,13 @@ def assemble_video(clips_dir, outro, output, cfg, scene_count=None, scene_number
             cmd.extend(["-t", str(duration)])
         video_filter = (f"scale={width}:{height}:force_original_aspect_ratio=increase,"
                         f"crop={width}:{height},fps={fps},setsar=1")
+        if duration and float(duration) > source_duration:
+            # Slow generated model clips smoothly to fill their assigned
+            # runtime, rather than holding a frozen last frame at the end.
+            stretch = float(duration) / source_duration
+            video_filter += (f",minterpolate=fps={fps * 2}:mi_mode=mci"
+                             f",setpts={stretch:.8f}*PTS,fps={fps}")
+            video_filter += f",tpad=stop_mode=clone:stop_duration={float(duration) - source_duration:.6f}"
         if hold_after.get(i, 0):
             video_filter += f",tpad=stop_mode=clone:stop_duration={float(hold_after[i]):.6f}"
         cmd.extend(["-vf", video_filter,
@@ -120,7 +128,7 @@ def assemble_video(clips_dir, outro, output, cfg, scene_count=None, scene_number
     if logo_pad > 0:
         logo_filter += f",tpad=stop_mode=clone:stop_duration={logo_pad:.6f}"
     outro_seconds = float(cfg["video"].get("outro_seconds", 2.0))
-    _run(["ffmpeg","-y","-i",str(outro),"-t",str(outro_seconds),"-vf",logo_filter,
+    _run(["ffmpeg","-y","-i",str(outro),"-t",str(outro_seconds + logo_pad),"-vf",logo_filter,
           "-an","-c:v","libx264","-preset",preset,"-crf",crf,
           "-pix_fmt","yuv420p","-r",str(fps),str(norm_outro)])
     concat = temp / "concat.txt"
@@ -136,7 +144,7 @@ def assemble_video(clips_dir, outro, output, cfg, scene_count=None, scene_number
     return output
 
 
-def fit_model_scene_durations(product_clip, outro, target_seconds, fps, scene_numbers=(5, 6),
+def fit_model_scene_durations(product_clip, outro, target_seconds, fps, scene_numbers=(2, 3),
                               outro_seconds=None, hold_seconds=0):
     """Allocate the remaining final-video frames evenly across cached model clips."""
     target_frames = round(float(target_seconds) * int(fps))

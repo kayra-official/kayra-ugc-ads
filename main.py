@@ -33,16 +33,16 @@ def run(image):
     clips = project / "clips"
     print("[1/5] Slowing the supplied product video and removing its audio...")
     prepare_product_clip(product_clip, clips / "scene_01.mp4", cfg)
-    print("[2/5] Generating model-with-jewellery scenes 5–6...")
+    print("[2/5] Generating model-with-jewellery scenes 2–3...")
     board = create_storyboard({"source": str(image)}, cfg, refs)
-    board["scenes"] = [scene for scene in board["scenes"] if scene["scene_number"] in (5, 6)]
-    board["scene_count"] = 6
-    board["pipeline"] = "product_clip_scene_1_model_ugc_scenes_5_6_v3"
+    board["scenes"] = [scene for scene in board["scenes"] if scene["scene_number"] in (2, 3)]
+    board["scene_count"] = 2
+    board["pipeline"] = "product_clip_scene_1_model_ugc_scenes_2_3_v4"
     board["duration_seconds"] = cfg["video"]["target_seconds"]
     save_storyboard(board, project)
     render_contact_sheet(board, refs["product_hero"], project/"storyboard_contact_sheet.jpg")
     process_all(board, refs["product_hero"], project, cfg, lambda n,total,msg: print(msg))
-    if any(not (clips/f"scene_{i:02d}.mp4").exists() for i in (1, 5, 6)):
+    if any(not (clips/f"scene_{i:02d}.mp4").exists() for i in (1, 2, 3)):
         print("Some scenes remain. Run again to continue.")
         return None
     print("[3/5] Loading Kayra logo outro...")
@@ -54,15 +54,15 @@ def run(image):
     print("[4/5] Assembling the product clip, two model scenes and Kayra logo...")
     clip_durations = fit_model_scene_durations(
         clips / "scene_01.mp4", outro, cfg["video"]["target_seconds"], cfg["video"]["fps"],
-        scene_numbers=(5, 6), outro_seconds=cfg["video"]["outro_seconds"],
+        scene_numbers=(2, 3), outro_seconds=cfg["video"]["outro_seconds"],
     )
     assembled = assemble_video(
         clips,
         outro,
         project / "picture_only.mp4",
         cfg,
-        scene_count=6,
-        scene_numbers=(1, 5, 6),
+        scene_count=3,
+        scene_numbers=(1, 2, 3),
         clip_durations=clip_durations,
     )
     print("[5/5] Adding background music and checking the export...")

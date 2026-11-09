@@ -1,8 +1,7 @@
 from pathlib import Path
 import json
-from shutil import copy2
-from .video_generator import generate_scene, VideoGenerationError
-from .video_assembler import slow_motion_clip
+import hashlib
+from .video_generator import VideoGenerationError, generate_scene
 
 
 def _find_model_reference_set(master_reference, project_dir):
@@ -80,75 +79,79 @@ def process_all(board, image_path, project_dir, cfg, progress=None):
     state.setdefault("completed", [])
     state.setdefault("failed", {})
 
+    # Migrate old model clip names 05/06 to the compact final numbering 02/03.
+    # Keep any existing renders and request files together under their new IDs.
+    for old_number, new_number in ((5, 2), (6, 3)):
+        old_prefix, new_prefix = f"scene_{old_number:02d}", f"scene_{new_number:02d}"
+        for old_path in list(clips.glob(f"{old_prefix}*")):
+            new_path = clips / (new_prefix + old_path.name[len(old_prefix):])
+            if new_path.exists():
+                archive = clips / "renumbered_legacy_scenes"
+                archive.mkdir(exist_ok=True)
+                new_path = archive / old_path.name
+            old_path.replace(new_path)
+    state["completed"] = sorted({
+        {5: 2, 6: 3}.get(int(number), int(number))
+        for number in state["completed"] if int(number) not in (7, 8)
+    })
+    state["failed"] = {
+        str({"5": 2, "6": 3}.get(str(number), number)): error
+        for number, error in state["failed"].items() if str(number) not in ("7", "8")
+    }
+    applied_state = state.get("slow_motion_applied", {})
+    if isinstance(applied_state, dict):
+        state["slow_motion_applied"] = {
+            str({"5": 2, "6": 3}.get(str(number), number)): speed
+            for number, speed in applied_state.items() if str(number) not in ("7", "8")
+        }
+
     references = board.get("references", {})
     missing_refs = [key for key in ("product_hero", "model_ugc")
                     if not Path(references.get(key, "")).is_file()]
     if missing_refs:
         raise FileNotFoundError("Source references missing: " + ", ".join(missing_refs))
-    product = Path(references["product_hero"]).resolve()
+    def sha256_file(path):
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
 
-    for n in (5, 6):
+    for n in (2, 3):
         existing = clips / f"scene_{n:02d}.mp4"
         if existing.is_file() and existing.stat().st_size > 1024:
             scene = next((s for s in board["scenes"] if int(s["scene_number"]) == n), None)
             expected_ref = Path(
                 (scene or {}).get("reference_image") or references.get("model_ugc", "")
             ).resolve()
-            request_path = clips / f"scene_{n:02d}_ltx_source.request.json"
-            if not request_path.exists():
-                request_path = clips / f"scene_{n:02d}.request.json"
+            metadata_path = clips / f"scene_{n:02d}.request.json"
             try:
-                previous_request = json.loads(request_path.read_text())
-                previous_ref_value = previous_request.get("reference_image")
-                previous_ref = Path(previous_ref_value).resolve() if previous_ref_value else None
+                previous = json.loads(metadata_path.read_text())
             except (OSError, ValueError, TypeError):
-                previous_request = {}
-                previous_ref = None
-
-            expected_prompt = (scene or {}).get("video_prompt")
-            prompt_changed = bool(expected_prompt and previous_request.get("prompt")
-                                  and previous_request["prompt"] != expected_prompt)
-            if previous_ref is not None and (previous_ref != expected_ref or prompt_changed):
-                # Preserve old renders, but regenerate when the source or scene
-                # direction changed so the new timeline uses the right footage.
+                previous = {}
+            current = (
+                previous.get("model") == "LTX-2.3 MLX"
+                and previous.get("reference_image") == str(expected_ref)
+                and previous.get("reference_sha256") == sha256_file(expected_ref)
+                and previous.get("prompt") == (scene or {}).get("video_prompt")
+                and float(previous.get("duration_seconds", 0)) == float((scene or {}).get("duration_seconds", 7.0))
+            )
+            if not current:
+                # Preserve old LTX/mismatched renders, then recreate from the
+                # exact supplied still with a deterministic camera path.
                 archive = clips / "stale_model_scene"
                 archive.mkdir(exist_ok=True)
-                for stale in (existing, clips / f"scene_{n:02d}_ltx_source.mp4",
-                              request_path, clips / f"scene_{n:02d}.request.json"):
+                for stale in (existing, metadata_path, clips / f"scene_{n:02d}.motion.json", clips / f"scene_{n:02d}_ltx_source.mp4",
+                              clips / f"scene_{n:02d}_ltx_source.request.json",
+                              clips / f"scene_{n:02d}.request.json"):
                     if stale.is_file():
                         destination = archive / stale.name
                         if destination.exists():
                             destination = archive / f"{stale.stem}_{len(list(archive.iterdir()))}{stale.suffix}"
                         stale.replace(destination)
                 state["completed"] = [done for done in state["completed"] if int(done) != n]
-                applied = state.get("slow_motion_applied", {})
-                if isinstance(applied, dict):
-                    applied.pop(str(n), None)
             else:
                 state["completed"] = sorted(set(state["completed"] + [n]))
-
-    applied = state.setdefault("slow_motion_applied", {})
-    if isinstance(applied, list):
-        applied = {str(n): 0.60 for n in applied}
-        state["slow_motion_applied"] = applied
-    model_speed = float(cfg["generation"].get("model_scene_speed", 0.5))
-
-    # Retiming only the two retained model scenes avoids touching discarded clips.
-    for n in (5, 6):
-        dest = clips / f"scene_{n:02d}.mp4"
-        if n in state["completed"] and dest.is_file() and applied.get(str(n)) != model_speed:
-            source_clip = clips / f"scene_{n:02d}_ltx_source.mp4"
-            source_speed = float(applied.get(str(n), 1.0))
-            retime_speed = model_speed
-            if not source_clip.is_file():
-                copy2(dest, source_clip)
-                retime_speed = model_speed / source_speed
-            temp_slow = clips / f".scene_{n:02d}.slow.mp4"
-            slow_motion_clip(source_clip, temp_slow, cfg, speed=retime_speed,
-                             target_duration=cfg["video"].get("scene_seconds", 7.0))
-            temp_slow.replace(dest)
-            applied[str(n)] = model_speed
-            manifest.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
     retries = int(cfg["generation"].get("retries", 1))
     max_scenes = int(cfg["generation"].get("max_scenes_per_run", len(board["scenes"])))
@@ -166,12 +169,7 @@ def process_all(board, image_path, project_dir, cfg, progress=None):
         last_error = None
         for _ in range(retries + 1):
             try:
-                raw = clips / f"scene_{n:02d}_ltx_source.mp4" if n in (5, 6) else dest
-                generate_scene(scene, ref, raw, cfg, product_reference=product)
-                if n in (5, 6):
-                    slow_motion_clip(raw, dest, cfg, speed=model_speed,
-                                     target_duration=float(scene.get("duration_seconds", 7.0)))
-                    applied[str(n)] = model_speed
+                generate_scene(scene, ref, dest, cfg)
                 state["completed"] = sorted(set(state["completed"] + [n]))
                 state["failed"].pop(str(n), None)
                 last_error = None

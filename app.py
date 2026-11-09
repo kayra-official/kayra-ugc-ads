@@ -106,11 +106,11 @@ def generate_one(image_path, progress, start, span):
     clips = project / "clips"
     stage(0.04, "Slowing the supplied product video and removing its audio")
     prepare_product_clip(product_clip, clips / "scene_01.mp4", cfg)
-    stage(0.20, "Preparing model-with-jewelry scenes 5–6")
+    stage(0.20, "Preparing model-with-jewelry scenes 2–3")
     board = create_storyboard({"source": str(Path(image_path).resolve())}, cfg, refs)
-    board["scenes"] = [scene for scene in board["scenes"] if scene["scene_number"] in (5, 6)]
-    board["scene_count"] = 6
-    board["pipeline"] = "product_clip_scene_1_model_ugc_scenes_5_6_v3"
+    board["scenes"] = [scene for scene in board["scenes"] if scene["scene_number"] in (2, 3)]
+    board["scene_count"] = 2
+    board["pipeline"] = "product_clip_scene_1_model_ugc_scenes_2_3_v4"
     board["duration_seconds"] = cfg["video"]["target_seconds"]
     save_storyboard(board, project)
     render_contact_sheet(board, refs["product_hero"], project / "storyboard_contact_sheet.jpg")
@@ -118,7 +118,7 @@ def generate_one(image_path, progress, start, span):
         board, refs["product_hero"], project, cfg,
         lambda n, total, message: stage(0.20 + 0.55 * n / max(total, 1), message),
     )
-    missing = [i for i in (1, 5, 6) if not (clips / f"scene_{i:02d}.mp4").is_file()]
+    missing = [i for i in (1, 2, 3) if not (clips / f"scene_{i:02d}.mp4").is_file()]
     if missing:
         raise RuntimeError(f"{product_name}: scenes still missing: {', '.join(map(str, missing))}.")
 
@@ -130,10 +130,10 @@ def generate_one(image_path, progress, start, span):
     stage(0.84, "Appending the Kayra logo video")
     clip_durations = fit_model_scene_durations(
         clips / "scene_01.mp4", outro, cfg["video"]["target_seconds"], cfg["video"]["fps"],
-        scene_numbers=(5, 6), outro_seconds=cfg["video"]["outro_seconds"],
+        scene_numbers=(2, 3), outro_seconds=cfg["video"]["outro_seconds"],
     )
     assembled = assemble_video(clips, outro, project / "picture_only.mp4", cfg,
-        scene_count=6, scene_numbers=(1, 5, 6),
+        scene_count=3, scene_numbers=(1, 2, 3),
                                clip_durations=clip_durations)
     stage(0.90, "Adding background music")
     final_video = mix_music(assembled, find_music(cfg), project / "KAYRA_FINAL.mp4", cfg)

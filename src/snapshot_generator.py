@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
 from .snapshot_manager import discover_snapshots, PROMPTS
 from .product_image_generator import generate_product_snapshot, PRODUCT_BACKGROUND_PROMPT, product_snapshot_signature
 from .video_generator import generate_scene
+from .watermark_preprocessor import preprocess_product_images
 
 SNAPSHOT_PROMPTS = PROMPTS
 
@@ -56,12 +58,25 @@ def ensure_ugc_snapshots(product_folder, project_dir, cfg, progress=None, roles=
     for i, role in enumerate(roles, 1):
         source = product_source if role == "product_hero" else model_source
         if role == "model_ugc":
-            # Use the actual supplied model photo as LTX's reference. A generated
-            # intermediate portrait can change the face and jewellery before the
-            # video model even starts, so do not create or reuse that derivative.
-            output[role] = str(source.resolve())
+            # A user-approved, watermark-free touchup takes precedence over the
+            # supplier model photo. Keep it separate from the original input.
+            touchup = product_folder / "model_reference_touchup.png"
+            if touchup.is_file():
+                prepared_dir = project_dir / "processed"
+                prepared_dir.mkdir(parents=True, exist_ok=True)
+                prepared_touchup = prepared_dir / touchup.name
+                shutil.copy2(touchup, prepared_touchup)
+                output[role] = str(prepared_touchup.resolve())
+                if progress:
+                    progress(i, len(roles), "Using the approved clean model reference")
+                continue
+            # Clean only the model photo's watermark-like overlay and keep the
+            # original dimensions and jewellery pixels; never use a generated
+            # intermediate portrait for the model scenes.
+            prepared = preprocess_product_images(product_source, project_dir)
+            output[role] = prepared["model_reference"]
             if progress:
-                progress(i, len(roles), "Using original model-with-jewellery image")
+                progress(i, len(roles), "Using cleaned original model-with-jewellery image")
             continue
         target = stills / f"{role}.png"
         algorithm = "comfyui_iclight_local_v2" if role == "product_hero" else "model_ugc_v1"

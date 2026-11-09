@@ -10,7 +10,7 @@ video:
   height: 1920
   fps: 24
   target_seconds: 28
-  scene_count: 6
+  scene_count: 3
   scene_seconds: 7
   outro_seconds: 2
   clip_segment_seconds: 7
@@ -19,7 +19,7 @@ video:
   music_volume: 0.22
   audio_fade_seconds: 1.5
   product_speed: 0.5
-  product_clip_duration_seconds: 12
+  product_clip_duration_seconds: 10
 
 audio:
   background_music: "assets/music/background.mp3"
@@ -41,7 +41,6 @@ generation:
   frames: 89
   # Model video scenes use the original supplied model-with-jewellery image.
   snapshot_image_strength: 0.65
-  model_scene_speed: 0.5
   product_segmenter_model: "u2net"
   comfyui_url: "http://127.0.0.1:8188"
   comfyui_product_workflow: "assets/workflows/product_snapshot_api.json"
