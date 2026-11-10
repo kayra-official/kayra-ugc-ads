@@ -1,6 +1,6 @@
 # KAYRA AI VIDEO
 
-Local-first Brazilian jewellery video workflow. The final edit contains three clips: Scene 1 is the supplied product video prepared to 12 seconds; Scene 2 is a 7-second pendant-to-earrings move; Scene 3 is a 7-second pendant close-up that zooms out. The 2-second Kayra logo closes the 28-second video, with background music over the final edit.
+Local-first Brazilian jewellery video workflow. The final edit contains three clips: Scene 1 is the supplied product video prepared to 10 seconds; Scene 2 is a 7-second jewellery-only move from a pendant close-up to an earring close-up, keeping the model's face out of frame; Scene 3 is a 7-second pendant close-up that zooms out to reveal the model. The 2-second Kayra logo closes the 28-second video, with background music over the final edit.
 
 ## Install and run
 
@@ -16,7 +16,7 @@ Each product folder contains the product clip and two original images:
 - `product_reference.jpg`: jewellery only.
 - `model_reference.jpg`: creator wearing that jewellery.
 
-The app scans each product folder automatically. It dynamically trims each supplied product video to preserve six seconds of source footage, removes its original audio, and slows that footage to half speed for a 12-second opening. Shorter source clips are slowed further rather than trimmed below 12 seconds. Scenes 2–3 use smooth, deterministic camera moves over the original model-with-jewellery photo to preserve her identity and the exact jewelry. Scene 2 moves from the pendant to a close-up of the earrings; Scene 3 starts with a pendant close-up and slowly zooms out. Each is seven seconds. The 28-second final video uses 12 seconds for Scene 1, 14 seconds for Scenes 2–3, and the final 2 seconds for the Kayra logo.
+The app scans each product folder automatically. It dynamically selects the source segment for a 10-second opening, removes the product clip's original audio, and slows the footage to 45% speed. Shorter source clips are slowed further rather than output below 10 seconds. Scenes 2–3 use the original model-with-jewellery photo as their reference. Scene 2 uses a deterministic close crop that begins at the neckline and glides to the earring, keeping the face out of frame; Scene 3 is unchanged and zooms out from a pendant close-up to reveal the model. The 28-second final video allocates the remaining time across Scenes 2–3 and the Kayra logo.
 
 The product clip's original soundtrack is removed before assembly. The Kayra logo video is appended after Scene 3, then the local music track is laid over the full export.
 

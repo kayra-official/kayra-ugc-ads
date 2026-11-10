@@ -66,6 +66,14 @@ def ensure_ugc_snapshots(product_folder, project_dir, cfg, progress=None, roles=
                 prepared_dir.mkdir(parents=True, exist_ok=True)
                 prepared_touchup = prepared_dir / touchup.name
                 shutil.copy2(touchup, prepared_touchup)
+                (prepared_dir / "model_reference_touchup.json").write_text(
+                    json.dumps({
+                        "source_image": str(touchup.resolve()),
+                        "touchup_image": str(prepared_touchup.resolve()),
+                        "method": "approved_product_specific_image_touchup",
+                    }, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
                 output[role] = str(prepared_touchup.resolve())
                 if progress:
                     progress(i, len(roles), "Using the approved clean model reference")

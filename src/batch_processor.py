@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import hashlib
 from .video_generator import VideoGenerationError, generate_scene
+from .still_video_generator import generate_model_motion
 
 
 def _find_model_reference_set(master_reference, project_dir):
@@ -124,13 +125,18 @@ def process_all(board, image_path, project_dir, cfg, progress=None):
             expected_ref = Path(
                 (scene or {}).get("reference_image") or references.get("model_ugc", "")
             ).resolve()
-            metadata_path = clips / f"scene_{n:02d}.request.json"
+            metadata_path = clips / (
+                f"scene_{n:02d}.motion.json" if n == 2
+                else f"scene_{n:02d}.request.json"
+            )
             try:
                 previous = json.loads(metadata_path.read_text())
             except (OSError, ValueError, TypeError):
                 previous = {}
             current = (
-                previous.get("model") == "LTX-2.3 MLX"
+                previous.get("model") == (
+                    "FFmpeg deterministic still" if n == 2 else "LTX-2.3 MLX"
+                )
                 and previous.get("reference_image") == str(expected_ref)
                 and previous.get("reference_sha256") == sha256_file(expected_ref)
                 and previous.get("prompt") == (scene or {}).get("video_prompt")
@@ -169,7 +175,13 @@ def process_all(board, image_path, project_dir, cfg, progress=None):
         last_error = None
         for _ in range(retries + 1):
             try:
-                generate_scene(scene, ref, dest, cfg)
+                if n == 2:
+                    # A tightly framed, deterministic camera move prevents LTX
+                    # from widening back out to the full portrait and revealing
+                    # the model's face in this jewellery-detail scene.
+                    generate_model_motion(ref, dest, scene, cfg)
+                else:
+                    generate_scene(scene, ref, dest, cfg)
                 state["completed"] = sorted(set(state["completed"] + [n]))
                 state["failed"].pop(str(n), None)
                 last_error = None

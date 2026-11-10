@@ -18,7 +18,7 @@ video:
   preset: medium
   music_volume: 0.22
   audio_fade_seconds: 1.5
-  product_speed: 0.5
+  product_speed: 0.45
   product_clip_duration_seconds: 10
 
 audio:

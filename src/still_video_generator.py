@@ -31,11 +31,14 @@ def generate_model_motion(reference_image, output_path, scene, cfg):
     number = int(scene["scene_number"])
 
     # Source portrait landmarks after 9:16 center crop: pendant around (.46,.83),
-    # visible earring around (.22,.23). Ease smoothly between those landmarks.
+    # visible earring around (.22,.23). Keep the crop on the left side of the
+    # portrait so eyes, nose and mouth stay out of frame throughout Scene 2.
     if number == 2:
-        zoom = f"1.8*(1+{breathing})"
-        x = f"(iw-iw/zoom)*(0.41*(1-{eased}))"
-        y = f"(ih-ih/zoom)*(1-{eased})"
+        zoom = f"2.0*(1+{breathing})"
+        # Begin already close on the neckline and pendant, then glide to the
+        # matching earring. The first frame is never a full-portrait view.
+        x = "0"
+        y = f"(ih-ih/zoom)*(0.93-0.73*{eased})"
     elif number == 3:
         zoom = f"(1.8-0.8*{eased})*(1+{breathing})"
         # Keep the crop anchored near the pendant while widening to the full
@@ -62,6 +65,7 @@ def generate_model_motion(reference_image, output_path, scene, cfg):
     metadata = output.with_suffix(".motion.json")
     metadata.write_text(json.dumps({
         "scene_number": number,
+        "model": "FFmpeg deterministic still",
         "reference_image": str(source),
         "reference_sha256": _digest(source),
         "scene_name": scene.get("scene_name", ""),
